@@ -52,7 +52,8 @@ def main():
     port = int(os.environ.get("PORT", 8000))
     
     print(f"🌐 Starting server on port {port}")
-    print("🔍 Health check endpoint: /ping")
+    print("🔍 Health check endpoints: /health, /ping")
+    print("📊 Railway will use /health for health checks")
     
     # Start the server
     uvicorn.run(
