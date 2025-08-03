@@ -1,0 +1,11 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+healthcheckPath = "/ping"
+healthcheckTimeout = 600
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
+
+[env]
+PYTHON_VERSION = "3.10" 

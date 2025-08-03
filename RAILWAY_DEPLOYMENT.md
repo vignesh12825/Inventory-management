@@ -1,233 +1,171 @@
-# 🚂 Railway Deployment Guide
+# Railway Deployment Guide
 
-## Overview
-This guide will help you deploy your Inventory Management System to Railway using Docker containers.
+This guide explains how to deploy the Inventory Management System to Railway.
 
 ## Prerequisites
-- Railway account
-- GitHub repository with your code
-- Neon.tech PostgreSQL database
 
-## Step-by-Step Deployment
+1. **Railway Account**: Sign up at [railway.app](https://railway.app)
+2. **GitHub Repository**: Push your code to GitHub
+3. **Neon Database**: Your PostgreSQL database on Neon.tech
 
-### 1. Connect Your Repository
-1. Go to [Railway Dashboard](https://railway.app/dashboard)
-2. Click "New Project"
-3. Select "Deploy from GitHub repo"
-4. Choose your repository
+## Deployment Steps
 
-### 2. Configure Environment Variables
-In your Railway project dashboard, go to the "Variables" tab and add these environment variables:
+### 1. Backend Deployment
 
-#### Required Variables:
-```env
-DATABASE_URL=postgresql://neondb_owner:npg_F7JVLiacNCu0@ep-empty-glade-a1f1p80o-pooler.ap-southeast-1.aws.neon.tech/inventory_db?sslmode=require&channel_binding=require
-SECRET_KEY=your-super-secret-key-change-this-in-production
-```
+1. **Connect to Railway**:
+   - Go to Railway dashboard
+   - Click "New Project" → "Deploy from GitHub repo"
+   - Select your repository
+   - Choose the `backend` directory as the source
 
-#### Optional Variables (with defaults):
-```env
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-API_V1_STR=/api/v1
-PROJECT_NAME=Inventory Management System
-BACKEND_CORS_ORIGINS=["https://your-app-name.railway.app"]
-REACT_APP_API_URL=https://your-app-name.railway.app/api
-REACT_APP_WS_URL=wss://your-app-name.railway.app/ws
-```
+2. **Environment Variables**:
+   Set these environment variables in Railway:
+   ```
+   DATABASE_URL=postgresql://neondb_owner:npg_e6bOIDHrsf8T@ep-empty-glade-a1f1p80o-pooler.ap-southeast-1.aws.neon.tech/inventory_db?sslmode=require&channel_binding=require
+   SECRET_KEY=your-super-secret-key-change-this-in-production
+   DEBUG=False
+   ENVIRONMENT=production
+   ```
 
-### 3. Configure Deployment Settings
+3. **Deploy**:
+   - Railway will automatically detect the Python project
+   - It will install dependencies from `requirements.txt`
+   - The app will start using the `Procfile`
 
-#### Option A: Use Railway's Docker Compose Detection
-Railway will automatically detect your `docker-compose.yml` file.
+### 2. Frontend Deployment
 
-#### Option B: Manual Configuration
-If automatic detection doesn't work:
+1. **Create Second Service**:
+   - In the same Railway project, click "New Service"
+   - Choose "Deploy from GitHub repo"
+   - Select the same repository but choose the `frontend` directory
 
-1. Go to your project settings
-2. Set the following:
-   - **Build Command**: `docker compose build`
-   - **Start Command**: `docker compose up`
-   - **Health Check Path**: `/api/v1/health`
+2. **Environment Variables**:
+   Set these environment variables for the frontend:
+   ```
+   REACT_APP_API_URL=https://your-backend-service-url.railway.app
+   REACT_APP_API_VERSION=/api/v1
+   ```
 
-### 4. Deploy
+3. **Deploy**:
+   - Railway will detect it's a Node.js project
+   - It will run `npm install` and `npm start`
 
-#### Method 1: Automatic Deployment
-1. Railway will automatically deploy when you push to your main branch
-2. Monitor the deployment in the Railway dashboard
+## Configuration Files
 
-#### Method 2: Manual Deployment
-1. Push your changes to GitHub
-2. Go to Railway dashboard
-3. Click "Deploy" button
+### Backend (`backend/`)
 
-## Troubleshooting Common Issues
+- `railway.toml`: Railway configuration
+- `Procfile`: Process definition
+- `requirements.txt`: Python dependencies
+- `app/core/config.py`: Application configuration
 
-### Issue 1: Nixpacks Build Failed
-**Solution**: Railway is trying to use Nixpacks instead of Docker.
+### Frontend (`frontend/`)
 
-**Fix**:
-1. Add `railway.toml` file to your project root:
-```toml
-[build]
-builder = "dockerfile"
+- `railway.toml`: Railway configuration
+- `package.json`: Node.js dependencies
+- `src/services/api.ts`: API configuration
 
-[deploy]
-startCommand = "docker compose up"
-healthcheckPath = "/api/v1/health"
-healthcheckTimeout = 300
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 10
-```
+## Environment Variables
 
-### Issue 2: Database Connection Failed
-**Solution**: Check your DATABASE_URL format.
+### Backend Environment Variables
 
-**Fix**:
-1. Ensure your Neon.tech connection string is correct
-2. Add SSL parameters: `?sslmode=require&channel_binding=require`
-3. Test the connection locally first
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DATABASE_URL` | Neon database connection string | `postgresql://user:pass@host/db` |
+| `SECRET_KEY` | JWT secret key | `your-secret-key` |
+| `DEBUG` | Debug mode | `False` |
+| `ENVIRONMENT` | Environment name | `production` |
 
-### Issue 3: Frontend Can't Connect to Backend
-**Solution**: Update CORS and API URLs.
+### Frontend Environment Variables
 
-**Fix**:
-1. Set `BACKEND_CORS_ORIGINS` to include your Railway domain
-2. Update `REACT_APP_API_URL` to use your Railway domain
-3. Use HTTPS for production URLs
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `REACT_APP_API_URL` | Backend API URL | `https://backend.railway.app` |
+| `REACT_APP_API_VERSION` | API version | `/api/v1` |
 
-### Issue 4: Build Timeout
-**Solution**: Optimize Docker builds.
+## Database Setup
 
-**Fix**:
-1. Use `.dockerignore` files (already included)
-2. Ensure `requirements.txt` is copied before source code
-3. Use multi-stage builds if needed
+1. **Run Migrations**:
+   ```bash
+   # Connect to your Railway backend service
+   railway run --service backend alembic upgrade head
+   ```
 
-## Railway-Specific Optimizations
+2. **Create Admin User**:
+   ```bash
+   railway run --service backend python create_admin_user.py
+   ```
 
-### 1. Use Railway Compose File
-Create `railway-compose.yml` for Railway-specific settings:
+## Health Checks
 
-```yaml
-version: '3.8'
-services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.railway
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - SECRET_KEY=${SECRET_KEY}
-    ports:
-      - "8000:8000"
-```
+- **Backend**: `/api/v1/health`
+- **Frontend**: `/`
 
-### 2. Health Checks
-Add health check endpoint to your FastAPI app:
+## Troubleshooting
 
-```python
-@app.get("/api/v1/health")
-async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now()}
-```
+### Common Issues
 
-### 3. Environment Variables
-Railway automatically provides these variables:
-- `RAILWAY_PUBLIC_DOMAIN`: Your app's public domain
-- `RAILWAY_STATIC_URL`: Static file serving URL
-- `PORT`: Port to bind to (Railway sets this)
+1. **Database Connection Failed**:
+   - Verify `DATABASE_URL` is correct
+   - Check Neon database is accessible
+   - Ensure SSL mode is set correctly
 
-## Monitoring and Debugging
+2. **Frontend Can't Connect to Backend**:
+   - Verify `REACT_APP_API_URL` points to correct backend URL
+   - Check CORS settings in backend
+   - Ensure both services are deployed
 
-### View Logs
-1. Go to Railway dashboard
-2. Click on your service
-3. Go to "Logs" tab
-4. View real-time logs
+3. **Build Failures**:
+   - Check `requirements.txt` for backend
+   - Check `package.json` for frontend
+   - Verify all dependencies are listed
 
-### Debug Commands
-```bash
-# Check if containers are running
-railway status
+### Logs
 
-# View logs
-railway logs
-
-# Access container shell
-railway shell
-
-# Check environment variables
-railway variables
-```
+View logs in Railway dashboard:
+- Go to your service
+- Click "Deployments" tab
+- Click on latest deployment
+- View logs for debugging
 
 ## Production Considerations
 
-### 1. Security
-- Change `SECRET_KEY` to a strong random string
-- Use environment variables for all sensitive data
-- Enable HTTPS (Railway provides this automatically)
+1. **Security**:
+   - Change `SECRET_KEY` to a strong random string
+   - Use environment variables for all secrets
+   - Enable HTTPS (Railway handles this)
 
-### 2. Performance
-- Use Railway's auto-scaling features
-- Monitor resource usage in Railway dashboard
-- Set up alerts for high resource usage
+2. **Performance**:
+   - Database connection pooling is handled by Neon
+   - Railway auto-scales based on traffic
+   - Consider CDN for static assets
 
-### 3. Database
-- Use connection pooling for PostgreSQL
-- Monitor database performance
-- Set up automated backups
+3. **Monitoring**:
+   - Railway provides basic monitoring
+   - Set up custom alerts if needed
+   - Monitor database performance on Neon
 
-## Custom Domain (Optional)
-1. Go to Railway dashboard
-2. Click "Settings" → "Domains"
-3. Add your custom domain
-4. Update DNS records as instructed
+## Custom Domains
 
-## SSL Certificate
-Railway automatically provides SSL certificates for:
-- `*.railway.app` domains
-- Custom domains (after DNS verification)
+1. **Add Custom Domain**:
+   - Go to Railway dashboard
+   - Select your service
+   - Go to "Settings" → "Domains"
+   - Add your custom domain
 
-## Scaling
-Railway supports automatic scaling:
-1. Go to service settings
-2. Enable "Auto-scaling"
-3. Set minimum and maximum instances
-4. Configure scaling rules
-
-## Backup and Recovery
-1. **Database**: Use Neon.tech's built-in backup features
-2. **Code**: Your GitHub repository serves as backup
-3. **Environment Variables**: Export from Railway dashboard
+2. **Update Environment Variables**:
+   - Update `REACT_APP_API_URL` to use custom domain
+   - Update CORS settings in backend
 
 ## Cost Optimization
-1. Use Railway's free tier for development
-2. Monitor usage in Railway dashboard
-3. Set up usage alerts
-4. Consider Railway's paid plans for production
 
----
-
-## Quick Deploy Checklist
-
-- [ ] Repository connected to Railway
-- [ ] Environment variables configured
-- [ ] `railway.toml` file added
-- [ ] `railway-compose.yml` created (optional)
-- [ ] Health check endpoint implemented
-- [ ] CORS settings updated
-- [ ] Database connection tested
-- [ ] SSL certificate verified
-- [ ] Custom domain configured (if needed)
+- Railway charges based on usage
+- Neon has a free tier for database
+- Monitor usage in Railway dashboard
+- Consider scaling down during low usage
 
 ## Support
-If you encounter issues:
-1. Check Railway's [documentation](https://docs.railway.app/)
-2. Review logs in Railway dashboard
-3. Test locally with Docker Compose
-4. Contact Railway support if needed
 
----
-
-**Note**: Remember to update your `DATABASE_URL` and `SECRET_KEY` for production deployment! 
+- Railway Documentation: [docs.railway.app](https://docs.railway.app)
+- Neon Documentation: [neon.tech/docs](https://neon.tech/docs)
+- Project Issues: Check GitHub repository 

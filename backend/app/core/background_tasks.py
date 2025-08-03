@@ -6,7 +6,7 @@ from sqlalchemy import and_
 from typing import Optional
 
 from app.core.database import get_db
-from app.models.stock_alert import StockAlert, AlertRule, AlertType, AlertStatus
+from app.models.stock_alert import StockAlert as StockAlertModel, AlertRule as AlertRuleModel, AlertType, AlertStatus
 from app.models.inventory import Inventory
 from app.models.product import Product
 from app.core.websocket import manager
@@ -56,7 +56,7 @@ class BackgroundTaskManager:
             db = next(get_db())
             
             # Get all active alert rules
-            rules = db.query(AlertRule).filter(AlertRule.is_active == True).all()
+            rules = db.query(AlertRuleModel).filter(AlertRuleModel.is_active == True).all()
             
             alerts_created = 0
             alerts_updated = 0
@@ -101,18 +101,18 @@ class BackgroundTaskManager:
                                 message = f"Overstock alert: {item.product.name} has {item.available_quantity} units (over {rule.threshold_percentage}% of max)"
                     
                     # Check existing alerts for this product/location/type
-                    existing_alert = db.query(StockAlert).filter(
+                    existing_alert = db.query(StockAlertModel).filter(
                         and_(
-                            StockAlert.product_id == item.product_id,
-                            StockAlert.location_id == item.location_id,
-                            StockAlert.alert_type == alert_type
+                            StockAlertModel.product_id == item.product_id,
+                            StockAlertModel.location_id == item.location_id,
+                            StockAlertModel.alert_type == alert_type
                         )
-                    ).order_by(StockAlert.created_at.desc()).first()
+                    ).order_by(StockAlertModel.created_at.desc()).first()
                     
                     if should_alert:
                         if not existing_alert:
                             # Create new alert only if no alert has ever existed for this combination
-                            new_alert = StockAlert(
+                            new_alert = StockAlertModel(
                                 product_id=item.product_id,
                                 location_id=item.location_id,
                                 alert_type=alert_type,

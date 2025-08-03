@@ -12,8 +12,9 @@ import {
   PaginatedResponse, UserWithPermissions, UserCreate, UserUpdate
 } from '../types';
 
-const API_BASE_URL = (window as any).__ENV__?.REACT_APP_API_URL || 'http://localhost:8000';
-const API_VERSION = (window as any).__ENV__?.REACT_APP_API_VERSION || '/api/v1';
+// Use environment variable for API URL, fallback to localhost for development
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_VERSION = process.env.REACT_APP_API_VERSION || '/api/v1';
 
 class ApiService {
   private api: AxiosInstance;

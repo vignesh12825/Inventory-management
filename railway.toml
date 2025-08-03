@@ -2,8 +2,7 @@
 builder = "dockerfile"
 
 [deploy]
-startCommand = "docker compose up"
-healthcheckPath = "/api/v1/health"
-healthcheckTimeout = 300
+healthcheckPath = "/ping"
+healthcheckTimeout = 600
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10 

@@ -4,12 +4,9 @@ from pydantic import validator
 import os
 
 class Settings(BaseSettings):
-    # Database
-    POSTGRES_DB: str = "inventory_db"
-    POSTGRES_USER: str = "inventory_user"
-    POSTGRES_PASSWORD: str = "root"
-    POSTGRES_HOST: str = "localhost"
-    POSTGRES_PORT: str = "5432"
+    # Database - Neon Configuration
+    # Railway will set DATABASE_URL environment variable
+    DATABASE_URL: str = "postgresql://neondb_owner:npg_e6bOIDHrsf8T@ep-empty-glade-a1f1p80o-pooler.ap-southeast-1.aws.neon.tech/inventory_db?sslmode=require&channel_binding=require"
     
     # JWT
     SECRET_KEY: str = "your-super-secret-key-change-this-in-production"
@@ -21,12 +18,17 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "Inventory Management System"
     
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    # CORS - Allow Railway domain
+    BACKEND_CORS_ORIGINS: List[str] = [
+        "http://localhost:3000", 
+        "http://localhost:8000",
+        "https://*.railway.app",
+        "https://*.up.railway.app"
+    ]
     
-    # Development
-    DEBUG: bool = True
-    ENVIRONMENT: str = "development"
+    # Environment
+    DEBUG: bool = False  # Set to False for production
+    ENVIRONMENT: str = "production"
     
     # Logging
     LOG_LEVEL: str = "INFO"
@@ -39,12 +41,9 @@ class Settings(BaseSettings):
             return v
         raise ValueError(v)
     
-    @property
-    def DATABASE_URL(self) -> str:
-        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-    
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Allow extra fields to prevent validation errors
 
 settings = Settings() 

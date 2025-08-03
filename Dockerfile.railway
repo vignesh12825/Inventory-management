@@ -1,0 +1,62 @@
+# Railway-optimized Dockerfile for Inventory Management System
+FROM python:3.10-slim
+
+# Set working directory
+WORKDIR /app
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    curl \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy backend requirements first for caching
+COPY backend/requirements.txt ./backend/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# Copy backend application
+COPY backend/ ./backend/
+
+# Copy frontend package files
+COPY frontend/package*.json ./frontend/
+
+# Install frontend dependencies
+WORKDIR /app/frontend
+RUN npm ci --only=production
+
+# Copy frontend source code
+COPY frontend/ .
+
+# Build the React app
+RUN npm run build
+
+# Install serve globally
+RUN npm install -g serve
+
+# Go back to root
+WORKDIR /app
+
+# Create non-root user for security
+RUN adduser --disabled-password --gecos '' appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Expose port (Railway will set the PORT environment variable)
+EXPOSE $PORT
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:$PORT/api/v1/health || exit 1
+
+# Start the FastAPI application (Railway will handle the frontend separately)
+CMD ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"] 

@@ -37,7 +37,7 @@ class StockAlert(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    product = relationship("Product")
+    product = relationship("Product", back_populates="stock_alerts")
     location = relationship("Location")
     acknowledged_user = relationship("User", foreign_keys=[acknowledged_by])
     resolved_user = relationship("User", foreign_keys=[resolved_by])
