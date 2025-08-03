@@ -1,4 +1,4 @@
-# Railway-optimized Dockerfile for Frontend
+# Simple Frontend Dockerfile - Minimal npm configuration
 FROM node:18-alpine
 
 # Set working directory
@@ -7,12 +7,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Configure npm to avoid authentication issues
-RUN npm config set registry https://registry.npmjs.org/
-RUN npm config set strict-ssl false
-
-# Install dependencies
-RUN npm install --omit=dev --no-audit --no-fund
+# Install dependencies with minimal configuration
+RUN npm install --omit=dev --no-audit --no-fund --no-optional
 
 # Copy source code
 COPY . .
@@ -23,8 +19,13 @@ RUN npm run build
 # Install serve globally
 RUN npm install -g serve
 
+# Create non-root user
+RUN adduser -D appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
 # Expose port
 EXPOSE 3000
 
-# Start the application
+# Start the app
 CMD ["serve", "-s", "build", "-l", "3000"] 

@@ -1,0 +1,34 @@
+# Frontend Dockerfile using Yarn (Alternative to npm)
+FROM node:18-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Install yarn
+RUN npm install -g yarn
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies using yarn (no authentication required for public packages)
+RUN yarn install --production --frozen-lockfile
+
+# Copy source code
+COPY . .
+
+# Build the React app
+RUN yarn build
+
+# Install serve globally
+RUN yarn global add serve
+
+# Create non-root user
+RUN adduser -D appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 3000
+
+# Start the app
+CMD ["serve", "-s", "build", "-l", "3000"] 

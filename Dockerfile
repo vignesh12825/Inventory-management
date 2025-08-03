@@ -1,4 +1,4 @@
-# Simple Railway Dockerfile for Inventory Management System
+# Simple Railway Dockerfile for Inventory Management System - Backend Only
 FROM python:3.10-slim
 
 # Set working directory
