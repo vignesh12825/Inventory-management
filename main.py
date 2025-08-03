@@ -25,28 +25,17 @@ else:
     sys.path.insert(0, backend_path)
     sys.path.insert(0, app_path)
 
-# Try to import settings, but don't fail if it doesn't work
-try:
-    from app.core.config import settings
-    PROJECT_NAME = settings.PROJECT_NAME
-    API_V1_STR = settings.API_V1_STR
-    BACKEND_CORS_ORIGINS = settings.BACKEND_CORS_ORIGINS
-    DATABASE_URL = settings.DATABASE_URL
-except ImportError as e:
-    print(f"⚠️  Warning: Could not import settings: {e}")
-    PROJECT_NAME = "Inventory Management System"
-    API_V1_STR = "/api/v1"
-    BACKEND_CORS_ORIGINS = ["*"]
-    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://neondb_owner:npg_e6bOIDHrsf8T@ep-empty-glade-a1f1p80o-pooler.ap-southeast-1.aws.neon.tech:5432/neondb")
+# Import settings
+from app.core.config import settings
+PROJECT_NAME = settings.PROJECT_NAME
+API_V1_STR = settings.API_V1_STR
+BACKEND_CORS_ORIGINS = settings.BACKEND_CORS_ORIGINS
+DATABASE_URL = settings.DATABASE_URL
 
-# Try to import API router, but don't fail if it doesn't work
-try:
-    from app.api.v1.api import api_router
-    HAS_API_ROUTER = True
-    print("✅ Successfully imported API router")
-except ImportError as e:
-    print(f"⚠️  Warning: Could not import API router: {e}")
-    HAS_API_ROUTER = False
+# Import API router
+from app.api.v1.api import api_router
+HAS_API_ROUTER = True
+print("✅ Successfully imported API router")
 
 app = FastAPI(
     title=PROJECT_NAME,
@@ -66,12 +55,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API router only if it's available
-if HAS_API_ROUTER:
-    app.include_router(api_router, prefix=API_V1_STR)
-    print("✅ API router included successfully")
-else:
-    print("⚠️  API router not included due to import errors")
+# Include API router
+app.include_router(api_router, prefix=API_V1_STR)
+print("✅ API router included successfully")
 
 @app.on_event("startup")
 async def startup_event():
