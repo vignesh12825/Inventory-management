@@ -4,9 +4,9 @@ from pydantic import validator
 import os
 
 class Settings(BaseSettings):
-    # Database - Neon Configuration
-    # Railway will set DATABASE_URL environment variable
-    DATABASE_URL: str = "postgresql://neondb_owner:npg_e6bOIDHrsf8T@ep-empty-glade-a1f1p80o-pooler.ap-southeast-1.aws.neon.tech/inventory_db?sslmode=require&channel_binding=require"
+    # Database Configuration
+    # Use environment variables or fallback to local database
+    DATABASE_URL: str = "postgresql://inventory_user:root@postgres:5432/inventory_db"
     
     # JWT
     SECRET_KEY: str = "your-super-secret-key-change-this-in-production"
@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     ]
     
     # Environment
-    DEBUG: bool = False  # Set to False for production
-    ENVIRONMENT: str = "production"
+    DEBUG: bool = True  # Set to True for development
+    ENVIRONMENT: str = "development"
     
     # Logging
     LOG_LEVEL: str = "INFO"

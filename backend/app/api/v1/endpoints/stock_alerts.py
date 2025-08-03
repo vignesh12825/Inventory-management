@@ -1,26 +1,31 @@
 from typing import List, Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, and_, or_
+from datetime import datetime
+
 from app.core.database import get_db
 from app.schemas.stock_alert import (
-    StockAlert, StockAlertCreate, StockAlertUpdate,
-    AlertRule, AlertRuleCreate, AlertRuleUpdate,
-    AlertType, AlertStatus
+    StockAlert as StockAlertSchema, 
+    StockAlertCreate, 
+    StockAlertUpdate,
+    AlertRule as AlertRuleSchema,
+    AlertRuleCreate, 
+    AlertRuleUpdate,
+    AlertType, 
+    AlertStatus, 
+    StockAlertList,
+    AlertRuleList
 )
-from app.schemas.common import PaginatedResponse
-from app.models.stock_alert import (
-    StockAlert as StockAlertModel, 
-    AlertRule as AlertRuleModel
-)
-from app.models.product import Product as ProductModel
-from app.models.inventory import Inventory as InventoryModel
-from sqlalchemy import and_, or_
-from sqlalchemy.orm import joinedload
-from datetime import datetime
+from app.models.stock_alert import StockAlert, AlertRule
+from app.models.product import Product
+from app.models.inventory import Inventory
+from app.core.security import get_current_user
+from app.models.user import User
 
 router = APIRouter()
 
-@router.get("/alerts", response_model=PaginatedResponse[StockAlert])
+@router.get("/alerts", response_model=StockAlertList)
 def get_stock_alerts(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -31,128 +36,96 @@ def get_stock_alerts(
     db: Session = Depends(get_db)
 ) -> Any:
     """Get all stock alerts with optional filtering and pagination"""
-    query = db.query(StockAlertModel).options(
-        joinedload(StockAlertModel.product),
-        joinedload(StockAlertModel.location)
+    query = db.query(StockAlert).options(
+        joinedload(StockAlert.product),
+        joinedload(StockAlert.location)
     )
     
     if status:
-        query = query.filter(StockAlertModel.status == status)
+        query = query.filter(StockAlert.status == status)
     
     if alert_type:
-        query = query.filter(StockAlertModel.alert_type == alert_type)
+        query = query.filter(StockAlert.alert_type == alert_type)
     
     if product_id:
-        query = query.filter(StockAlertModel.product_id == product_id)
+        query = query.filter(StockAlert.product_id == product_id)
     
     if location_id:
-        query = query.filter(StockAlertModel.location_id == location_id)
+        query = query.filter(StockAlert.location_id == location_id)
     
     total = query.count()
-    alerts = query.order_by(StockAlertModel.created_at.desc()).offset(skip).limit(limit).all()
+    alerts = query.order_by(StockAlert.created_at.desc()).offset(skip).limit(limit).all()
     
-    return PaginatedResponse(
-        data=alerts,
+    return StockAlertList(
+        alerts=alerts,
         total=total,
         page=skip // limit + 1,
         size=limit
     )
 
-@router.get("/alerts/active", response_model=List[StockAlert])
+@router.get("/alerts/active", response_model=List[StockAlertSchema])
 def get_active_alerts(db: Session = Depends(get_db)):
     """Get all active stock alerts"""
-    alerts = db.query(StockAlertModel).options(
-        joinedload(StockAlertModel.product),
-        joinedload(StockAlertModel.location)
+    alerts = db.query(StockAlert).options(
+        joinedload(StockAlert.product),
+        joinedload(StockAlert.location)
     ).filter(
-        StockAlertModel.status == AlertStatus.ACTIVE
-    ).order_by(StockAlertModel.created_at.desc()).all()
+        StockAlert.status == AlertStatus.ACTIVE
+    ).order_by(StockAlert.created_at.desc()).all()
     return alerts
 
-@router.post("/alerts", response_model=StockAlert)
+@router.post("/alerts", response_model=StockAlertSchema)
 async def create_stock_alert(alert: StockAlertCreate, db: Session = Depends(get_db)):
     """Create a new stock alert"""
     # Validate product exists
-    product = db.query(ProductModel).filter(ProductModel.id == alert.product_id).first()
+    product = db.query(Product).filter(Product.id == alert.product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     
     # Check if similar alert already exists
-    existing_alert = db.query(StockAlertModel).filter(
+    existing_alert = db.query(StockAlert).filter(
         and_(
-            StockAlertModel.product_id == alert.product_id,
-            StockAlertModel.location_id == alert.location_id,
-            StockAlertModel.alert_type == alert.alert_type,
-            StockAlertModel.status == AlertStatus.ACTIVE
+            StockAlert.product_id == alert.product_id,
+            StockAlert.location_id == alert.location_id,
+            StockAlert.alert_type == alert.alert_type,
+            StockAlert.status == AlertStatus.ACTIVE
         )
     ).first()
     
     if existing_alert:
-        # Update the existing alert instead of creating a new one
-        existing_alert.current_quantity = alert.current_quantity
-        existing_alert.threshold_quantity = alert.threshold_quantity
-        existing_alert.message = alert.message
-        existing_alert.updated_at = datetime.utcnow()
-        db.commit()
-        db.refresh(existing_alert)
         return existing_alert
     
-    db_alert = StockAlertModel(**alert.dict())
+    db_alert = StockAlert(**alert.dict())
     db.add(db_alert)
     db.commit()
     db.refresh(db_alert)
     
-    # Send WebSocket notification
-    try:
-        from app.core.websocket import manager
-        alert_data = {
-            "id": db_alert.id,
-            "product_id": db_alert.product_id,
-            "location_id": db_alert.location_id,
-            "alert_type": db_alert.alert_type.value,
-            "message": db_alert.message,
-            "current_quantity": db_alert.current_quantity,
-            "threshold_quantity": db_alert.threshold_quantity,
-            "status": db_alert.status.value
-        }
-        await manager.send_alert(alert_data)
-    except Exception as e:
-        # Log error but don't fail the alert creation
-        print(f"Failed to send WebSocket notification: {e}")
-    
     # Reload with relationships
-    db_alert = db.query(StockAlertModel).options(
-        joinedload(StockAlertModel.product),
-        joinedload(StockAlertModel.location)
-    ).filter(StockAlertModel.id == db_alert.id).first()
+    db_alert = db.query(StockAlert).options(
+        joinedload(StockAlert.product),
+        joinedload(StockAlert.location)
+    ).filter(StockAlert.id == db_alert.id).first()
     
     return db_alert
 
-@router.put("/alerts/{alert_id}", response_model=StockAlert)
+@router.put("/alerts/{alert_id}", response_model=StockAlertSchema)
 def update_stock_alert(alert_id: int, alert: StockAlertUpdate, db: Session = Depends(get_db)):
     """Update a stock alert"""
-    db_alert = db.query(StockAlertModel).options(
-        joinedload(StockAlertModel.product),
-        joinedload(StockAlertModel.location)
-    ).filter(StockAlertModel.id == alert_id).first()
+    db_alert = db.query(StockAlert).options(
+        joinedload(StockAlert.product),
+        joinedload(StockAlert.location)
+    ).filter(StockAlert.id == alert_id).first()
     if not db_alert:
         raise HTTPException(status_code=404, detail="Stock alert not found")
     
-    update_data = alert.dict(exclude_unset=True)
-    for field, value in update_data.items():
+    for field, value in alert.dict(exclude_unset=True).items():
         setattr(db_alert, field, value)
-    
-    # Set timestamps for status changes
-    if alert.status == AlertStatus.ACKNOWLEDGED and not db_alert.acknowledged_at:
-        db_alert.acknowledged_at = datetime.now()
-    elif alert.status == AlertStatus.RESOLVED and not db_alert.resolved_at:
-        db_alert.resolved_at = datetime.now()
     
     db.commit()
     db.refresh(db_alert)
     return db_alert
 
-@router.get("/rules", response_model=PaginatedResponse[AlertRule])
+@router.get("/rules", response_model=AlertRuleList)
 def get_alert_rules(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -161,51 +134,51 @@ def get_alert_rules(
     db: Session = Depends(get_db)
 ) -> Any:
     """Get all alert rules with optional filtering and pagination"""
-    query = db.query(AlertRuleModel)
+    query = db.query(AlertRule)
     
     if alert_type:
-        query = query.filter(AlertRuleModel.alert_type == alert_type)
+        query = query.filter(AlertRule.alert_type == alert_type)
     
     if is_active is not None:
-        query = query.filter(AlertRuleModel.is_active == is_active)
+        query = query.filter(AlertRule.is_active == is_active)
     
     total = query.count()
     rules = query.offset(skip).limit(limit).all()
     
-    return PaginatedResponse(
-        data=rules,
+    return AlertRuleList(
+        rules=rules,
         total=total,
         page=skip // limit + 1,
         size=limit
     )
 
-@router.post("/rules", response_model=AlertRule)
+@router.post("/rules", response_model=AlertRuleSchema)
 def create_alert_rule(rule: AlertRuleCreate, db: Session = Depends(get_db)):
     """Create a new alert rule"""
     # Validate product exists if specified
     if rule.product_id:
-        product = db.query(ProductModel).filter(ProductModel.id == rule.product_id).first()
+        product = db.query(Product).filter(Product.id == rule.product_id).first()
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
     
     rule_data = rule.dict()
     rule_data['created_by'] = 1  # TODO: Get from current user
     
-    db_rule = AlertRuleModel(**rule_data)
+    db_rule = AlertRule(**rule_data)
     db.add(db_rule)
     db.commit()
     db.refresh(db_rule)
+    
     return db_rule
 
-@router.put("/rules/{rule_id}", response_model=AlertRule)
+@router.put("/rules/{rule_id}", response_model=AlertRuleSchema)
 def update_alert_rule(rule_id: int, rule: AlertRuleUpdate, db: Session = Depends(get_db)):
     """Update an alert rule"""
-    db_rule = db.query(AlertRuleModel).filter(AlertRuleModel.id == rule_id).first()
+    db_rule = db.query(AlertRule).filter(AlertRule.id == rule_id).first()
     if not db_rule:
         raise HTTPException(status_code=404, detail="Alert rule not found")
     
-    update_data = rule.dict(exclude_unset=True)
-    for field, value in update_data.items():
+    for field, value in rule.dict(exclude_unset=True).items():
         setattr(db_rule, field, value)
     
     db.commit()
@@ -215,12 +188,13 @@ def update_alert_rule(rule_id: int, rule: AlertRuleUpdate, db: Session = Depends
 @router.delete("/rules/{rule_id}")
 def delete_alert_rule(rule_id: int, db: Session = Depends(get_db)):
     """Delete an alert rule (soft delete by setting is_active to False)"""
-    rule = db.query(AlertRuleModel).filter(AlertRuleModel.id == rule_id).first()
+    rule = db.query(AlertRule).filter(AlertRule.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Alert rule not found")
     
     rule.is_active = False
     db.commit()
+    
     return {"message": "Alert rule deactivated successfully"}
 
 @router.post("/check-alerts")
@@ -356,31 +330,30 @@ async def trigger_immediate_check():
 @router.post("/cleanup-duplicates")
 def cleanup_duplicate_alerts(db: Session = Depends(get_db)):
     """Clean up duplicate alerts by keeping only the most recent one for each product/location/type combination"""
-    from sqlalchemy import func
     
     # Find duplicate alerts
     duplicates = db.query(
-        StockAlertModel.product_id,
-        StockAlertModel.location_id,
-        StockAlertModel.alert_type,
-        func.count(StockAlertModel.id).label('count')
+        StockAlert.product_id,
+        StockAlert.location_id,
+        StockAlert.alert_type,
+        func.count(StockAlert.id).label('count')
     ).group_by(
-        StockAlertModel.product_id,
-        StockAlertModel.location_id,
-        StockAlertModel.alert_type
-    ).having(func.count(StockAlertModel.id) > 1).all()
+        StockAlert.product_id,
+        StockAlert.location_id,
+        StockAlert.alert_type
+    ).having(func.count(StockAlert.id) > 1).all()
     
     deleted_count = 0
     
     for duplicate in duplicates:
         # Get all alerts for this combination, ordered by creation date (newest first)
-        alerts = db.query(StockAlertModel).filter(
+        alerts = db.query(StockAlert).filter(
             and_(
-                StockAlertModel.product_id == duplicate.product_id,
-                StockAlertModel.location_id == duplicate.location_id,
-                StockAlertModel.alert_type == duplicate.alert_type
+                StockAlert.product_id == duplicate.product_id,
+                StockAlert.location_id == duplicate.location_id,
+                StockAlert.alert_type == duplicate.alert_type
             )
-        ).order_by(StockAlertModel.created_at.desc()).all()
+        ).order_by(StockAlert.created_at.desc()).all()
         
         # Keep the most recent alert, delete the rest
         if len(alerts) > 1:

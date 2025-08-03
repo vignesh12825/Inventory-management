@@ -6,7 +6,7 @@ from sqlalchemy import and_
 from typing import Optional
 
 from app.core.database import get_db
-from app.models.stock_alert import StockAlert as StockAlertModel, AlertRule as AlertRuleModel, AlertType, AlertStatus
+from app.models.stock_alert import StockAlert, AlertRule, AlertType, AlertStatus
 from app.models.inventory import Inventory
 from app.models.product import Product
 from app.core.websocket import manager
@@ -56,7 +56,7 @@ class BackgroundTaskManager:
             db = next(get_db())
             
             # Get all active alert rules
-            rules = db.query(AlertRuleModel).filter(AlertRuleModel.is_active == True).all()
+            rules = db.query(AlertRule).filter(AlertRule.is_active == True).all()
             
             alerts_created = 0
             alerts_updated = 0
@@ -98,120 +98,74 @@ class BackgroundTaskManager:
                             if item.available_quantity > max_threshold:
                                 should_alert = True
                                 alert_type = AlertType.OVERSTOCK
-                                message = f"Overstock alert: {item.product.name} has {item.available_quantity} units (over {rule.threshold_percentage}% of max)"
-                    
-                    # Check existing alerts for this product/location/type
-                    existing_alert = db.query(StockAlertModel).filter(
-                        and_(
-                            StockAlertModel.product_id == item.product_id,
-                            StockAlertModel.location_id == item.location_id,
-                            StockAlertModel.alert_type == alert_type
-                        )
-                    ).order_by(StockAlertModel.created_at.desc()).first()
+                                message = f"Overstock alert: {item.product.name} has {item.available_quantity} units (threshold: {max_threshold})"
                     
                     if should_alert:
+                        # Check if alert already exists
+                        existing_alert = db.query(StockAlert).filter(
+                            and_(
+                                StockAlert.product_id == item.product_id,
+                                StockAlert.location_id == item.location_id,
+                                StockAlert.alert_type == alert_type
+                            )
+                        ).order_by(StockAlert.created_at.desc()).first()
+                        
                         if not existing_alert:
-                            # Create new alert only if no alert has ever existed for this combination
-                            new_alert = StockAlertModel(
+                            # Create new alert
+                            new_alert = StockAlert(
                                 product_id=item.product_id,
                                 location_id=item.location_id,
                                 alert_type=alert_type,
                                 current_quantity=item.available_quantity,
                                 threshold_quantity=rule.threshold_quantity,
-                                message=message
+                                message=message,
+                                status=AlertStatus.ACTIVE
                             )
                             db.add(new_alert)
                             alerts_created += 1
                             
-                            # Send WebSocket notification for new alert
-                            try:
-                                alert_data = {
-                                    "id": new_alert.id,
-                                    "product_id": new_alert.product_id,
-                                    "location_id": new_alert.location_id,
-                                    "alert_type": new_alert.alert_type.value,
-                                    "message": new_alert.message,
-                                    "current_quantity": new_alert.current_quantity,
-                                    "threshold_quantity": new_alert.threshold_quantity,
-                                    "status": new_alert.status.value
-                                }
-                                await manager.send_alert(alert_data)
-                                logger.info(f"Sent WebSocket notification for new alert: {new_alert.id}")
-                            except Exception as e:
-                                logger.error(f"Failed to send WebSocket notification: {e}")
+                            # Send WebSocket notification
+                            await manager.broadcast_alert(new_alert)
                         
-                        elif existing_alert.status in [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]:
-                            # Update existing active/acknowledged alert to reflect current quantity
+                        elif existing_alert.status == AlertStatus.RESOLVED:
+                            # Reactivate resolved alert
+                            existing_alert.status = AlertStatus.ACTIVE
                             existing_alert.current_quantity = item.available_quantity
                             existing_alert.message = message
-                            existing_alert.updated_at = datetime.now()
+                            existing_alert.updated_at = datetime.utcnow()
                             alerts_updated += 1
-                        
-                        elif existing_alert.status in [AlertStatus.RESOLVED, AlertStatus.DISMISSED]:
-                            # Only reactivate if the alert was previously resolved/dismissed AND conditions are still bad
-                            # This prevents re-triggering of manually resolved alerts
-                            # Only reactivate if the current quantity is worse than when it was resolved
-                            if item.available_quantity < existing_alert.current_quantity:
-                                existing_alert.status = AlertStatus.ACTIVE
-                                existing_alert.current_quantity = item.available_quantity
-                                existing_alert.message = message
-                                existing_alert.acknowledged_at = None
-                                existing_alert.resolved_at = None
-                                existing_alert.updated_at = datetime.now()
-                                alerts_updated += 1
-                                
-                                # Send WebSocket notification for reactivated alert
-                                try:
-                                    alert_data = {
-                                        "id": existing_alert.id,
-                                        "product_id": existing_alert.product_id,
-                                        "location_id": existing_alert.location_id,
-                                        "alert_type": existing_alert.alert_type.value,
-                                        "message": existing_alert.message,
-                                        "current_quantity": existing_alert.current_quantity,
-                                        "threshold_quantity": existing_alert.threshold_quantity,
-                                        "status": existing_alert.status.value
-                                    }
-                                    await manager.send_alert(alert_data)
-                                    logger.info(f"Sent WebSocket notification for reactivated alert: {existing_alert.id}")
-                                except Exception as e:
-                                    logger.error(f"Failed to send WebSocket notification: {e}")
+                            
+                            # Send WebSocket notification
+                            await manager.broadcast_alert(existing_alert)
                     
                     else:
-                        # Check if we need to resolve existing alerts (conditions no longer apply)
-                        if existing_alert and existing_alert.status in [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]:
-                            # Conditions no longer apply, resolve the alert
+                        # Check if alert should be resolved
+                        existing_alert = db.query(StockAlert).filter(
+                            and_(
+                                StockAlert.product_id == item.product_id,
+                                StockAlert.location_id == item.location_id,
+                                StockAlert.alert_type == alert_type,
+                                StockAlert.status == AlertStatus.ACTIVE
+                            )
+                        ).first()
+                        
+                        if existing_alert:
+                            # Resolve alert
                             existing_alert.status = AlertStatus.RESOLVED
-                            existing_alert.resolved_at = datetime.now()
-                            existing_alert.updated_at = datetime.now()
+                            existing_alert.resolved_at = datetime.utcnow()
+                            existing_alert.updated_at = datetime.utcnow()
                             alerts_resolved += 1
-                            
-                            # Send WebSocket notification for resolved alert
-                            try:
-                                alert_data = {
-                                    "id": existing_alert.id,
-                                    "product_id": existing_alert.product_id,
-                                    "location_id": existing_alert.location_id,
-                                    "alert_type": existing_alert.alert_type.value,
-                                    "message": f"Alert resolved: {item.product.name} stock level improved",
-                                    "current_quantity": item.available_quantity,
-                                    "threshold_quantity": existing_alert.threshold_quantity,
-                                    "status": existing_alert.status.value
-                                }
-                                await manager.send_alert(alert_data)
-                                logger.info(f"Sent WebSocket notification for resolved alert: {existing_alert.id}")
-                            except Exception as e:
-                                logger.error(f"Failed to send WebSocket notification: {e}")
             
+            # Commit changes
             db.commit()
             
             if alerts_created > 0 or alerts_updated > 0 or alerts_resolved > 0:
-                logger.info(f"Stock alert check completed. {alerts_created} new alerts created, {alerts_updated} alerts updated, {alerts_resolved} alerts resolved.")
-            
+                logger.info(f"Stock alerts processed: {alerts_created} created, {alerts_updated} updated, {alerts_resolved} resolved")
+                
         except Exception as e:
             logger.error(f"Error checking stock alerts: {e}")
             if 'db' in locals():
                 db.rollback()
 
-# Global background task manager instance
+# Global instance
 background_task_manager = BackgroundTaskManager() 

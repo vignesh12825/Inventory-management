@@ -1,0 +1,69 @@
+# Full-Stack Dockerfile for Inventory Management System
+FROM node:18-alpine AS frontend-builder
+
+# Set working directory for frontend
+WORKDIR /app/frontend
+
+# Copy frontend package files
+COPY frontend/package*.json ./
+
+# Install frontend dependencies using yarn (no authentication issues)
+RUN npm install -g yarn
+RUN yarn install --frozen-lockfile
+
+# Copy frontend source code
+COPY frontend/ ./
+
+# Build the React app
+RUN yarn build
+
+# Python backend stage
+FROM python:3.10-slim
+
+# Set working directory
+WORKDIR /app
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    curl \
+    nginx \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy backend requirements first for caching
+COPY backend/requirements.txt ./backend/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# Copy backend application
+COPY backend/ ./backend/
+
+# Copy main.py to root
+COPY main.py ./
+
+# Copy startup script to root
+COPY start_railway.py ./
+
+# Copy built frontend from previous stage
+COPY --from=frontend-builder /app/frontend/build ./frontend/build
+
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Create non-root user for security
+RUN adduser --disabled-password --gecos '' appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Start the application
+CMD ["python", "start_railway.py"] 
