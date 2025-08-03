@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Railway startup script with error handling
+Railway startup script with robust error handling
 """
 import sys
 import os
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from datetime import datetime
 
 def create_minimal_app():
     """Create a minimal FastAPI app for Railway"""
@@ -18,18 +19,28 @@ def create_minimal_app():
         return {
             "status": "healthy",
             "message": "Inventory Management System API is running",
-            "version": "1.0.0"
+            "version": "1.0.0",
+            "timestamp": datetime.now().isoformat()
         }
     
     @app.get("/ping")
     async def ping():
         """Minimal health check for Railway"""
-        return {"status": "ok", "message": "pong"}
+        return {"status": "ok", "message": "pong", "timestamp": datetime.now().isoformat()}
     
     @app.get("/health")
     async def health():
         """Basic health check"""
-        return {"status": "healthy", "message": "Service is running"}
+        return {"status": "healthy", "message": "Service is running", "timestamp": datetime.now().isoformat()}
+    
+    @app.get("/status")
+    async def status():
+        """Detailed status endpoint"""
+        return {
+            "status": "healthy",
+            "mode": "minimal",
+            "timestamp": datetime.now().isoformat()
+        }
     
     return app
 

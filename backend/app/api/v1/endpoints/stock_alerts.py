@@ -1,20 +1,20 @@
-from typing import List, Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, and_, or_
-from datetime import datetime
+from sqlalchemy import and_, or_
+from typing import List, Any, Optional
+from datetime import datetime, timedelta
+import json
+import logging
 
 from app.core.database import get_db
 from app.schemas.stock_alert import (
-    StockAlert as StockAlertSchema, 
+    StockAlertSchema, 
     StockAlertCreate, 
     StockAlertUpdate,
-    AlertRule as AlertRuleSchema,
-    AlertRuleCreate, 
-    AlertRuleUpdate,
-    AlertType, 
-    AlertStatus, 
     StockAlertList,
+    AlertRuleSchema,
+    AlertRuleCreate,
+    AlertRuleUpdate,
     AlertRuleList
 )
 from app.models.stock_alert import StockAlert, AlertRule
@@ -121,10 +121,56 @@ def update_stock_alert(alert_id: int, alert: StockAlertUpdate, db: Session = Dep
     for field, value in alert.dict(exclude_unset=True).items():
         setattr(db_alert, field, value)
     
+    db_alert.updated_at = datetime.now()
     db.commit()
     db.refresh(db_alert)
+    
     return db_alert
 
+@router.delete("/alerts/{alert_id}")
+def delete_stock_alert(alert_id: int, db: Session = Depends(get_db)):
+    """Delete a stock alert"""
+    db_alert = db.query(StockAlert).filter(StockAlert.id == alert_id).first()
+    if not db_alert:
+        raise HTTPException(status_code=404, detail="Stock alert not found")
+    
+    db.delete(db_alert)
+    db.commit()
+    
+    return {"message": "Stock alert deleted successfully"}
+
+@router.post("/alerts/{alert_id}/acknowledge")
+def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Acknowledge a stock alert"""
+    db_alert = db.query(StockAlert).filter(StockAlert.id == alert_id).first()
+    if not db_alert:
+        raise HTTPException(status_code=404, detail="Stock alert not found")
+    
+    db_alert.acknowledged_by = current_user.id
+    db_alert.acknowledged_at = datetime.now()
+    db_alert.updated_at = datetime.now()
+    db.commit()
+    db.refresh(db_alert)
+    
+    return {"message": "Alert acknowledged successfully"}
+
+@router.post("/alerts/{alert_id}/resolve")
+def resolve_alert(alert_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Resolve a stock alert"""
+    db_alert = db.query(StockAlert).filter(StockAlert.id == alert_id).first()
+    if not db_alert:
+        raise HTTPException(status_code=404, detail="Stock alert not found")
+    
+    db_alert.status = AlertStatus.RESOLVED
+    db_alert.resolved_by = current_user.id
+    db_alert.resolved_at = datetime.now()
+    db_alert.updated_at = datetime.now()
+    db.commit()
+    db.refresh(db_alert)
+    
+    return {"message": "Alert resolved successfully"}
+
+# Alert Rules endpoints
 @router.get("/rules", response_model=AlertRuleList)
 def get_alert_rules(
     skip: int = Query(0, ge=0),
@@ -143,7 +189,7 @@ def get_alert_rules(
         query = query.filter(AlertRule.is_active == is_active)
     
     total = query.count()
-    rules = query.offset(skip).limit(limit).all()
+    rules = query.order_by(AlertRule.created_at.desc()).offset(skip).limit(limit).all()
     
     return AlertRuleList(
         rules=rules,
@@ -155,16 +201,7 @@ def get_alert_rules(
 @router.post("/rules", response_model=AlertRuleSchema)
 def create_alert_rule(rule: AlertRuleCreate, db: Session = Depends(get_db)):
     """Create a new alert rule"""
-    # Validate product exists if specified
-    if rule.product_id:
-        product = db.query(Product).filter(Product.id == rule.product_id).first()
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-    
-    rule_data = rule.dict()
-    rule_data['created_by'] = 1  # TODO: Get from current user
-    
-    db_rule = AlertRule(**rule_data)
+    db_rule = AlertRule(**rule.dict())
     db.add(db_rule)
     db.commit()
     db.refresh(db_rule)
@@ -181,185 +218,157 @@ def update_alert_rule(rule_id: int, rule: AlertRuleUpdate, db: Session = Depends
     for field, value in rule.dict(exclude_unset=True).items():
         setattr(db_rule, field, value)
     
+    db_rule.updated_at = datetime.now()
     db.commit()
     db.refresh(db_rule)
+    
     return db_rule
 
 @router.delete("/rules/{rule_id}")
 def delete_alert_rule(rule_id: int, db: Session = Depends(get_db)):
-    """Delete an alert rule (soft delete by setting is_active to False)"""
-    rule = db.query(AlertRule).filter(AlertRule.id == rule_id).first()
-    if not rule:
+    """Delete an alert rule"""
+    db_rule = db.query(AlertRule).filter(AlertRule.id == rule_id).first()
+    if not db_rule:
         raise HTTPException(status_code=404, detail="Alert rule not found")
     
-    rule.is_active = False
+    db.delete(db_rule)
     db.commit()
     
-    return {"message": "Alert rule deactivated successfully"}
+    return {"message": "Alert rule deleted successfully"}
 
+# Manual trigger endpoints
 @router.post("/check-alerts")
 async def check_stock_alerts(db: Session = Depends(get_db)):
-    """Manually trigger stock alert checking"""
-    # Get all active alert rules
-    rules = db.query(AlertRule).filter(AlertRule.is_active == True).all()
-    
-    alerts_created = 0
-    alerts_updated = 0
-    
-    for rule in rules:
-        # Build query based on rule criteria
-        query = db.query(Inventory).join(Product)
-        
-        if rule.product_id:
-            query = query.filter(Inventory.product_id == rule.product_id)
-        
-        if rule.location_id:
-            query = query.filter(Inventory.location_id == rule.location_id)
-        
-        inventory_items = query.all()
-        
-        for item in inventory_items:
-            # Check if alert should be triggered
-            should_alert = False
-            alert_type = None
-            message = ""
-            
-            if rule.alert_type == AlertType.LOW_STOCK:
-                if item.available_quantity <= rule.threshold_quantity:
-                    should_alert = True
-                    alert_type = AlertType.LOW_STOCK
-                    message = f"Low stock alert: {item.product.name} has {item.available_quantity} units available (threshold: {rule.threshold_quantity})"
-            
-            elif rule.alert_type == AlertType.OUT_OF_STOCK:
-                if item.available_quantity == 0:
-                    should_alert = True
-                    alert_type = AlertType.OUT_OF_STOCK
-                    message = f"Out of stock alert: {item.product.name} is out of stock"
-            
-            elif rule.alert_type == AlertType.OVERSTOCK:
-                if rule.threshold_percentage and item.product.max_stock_level:
-                    max_threshold = item.product.max_stock_level * (rule.threshold_percentage / 100)
-                    if item.available_quantity > max_threshold:
-                        should_alert = True
-                        alert_type = AlertType.OVERSTOCK
-                        message = f"Overstock alert: {item.product.name} has {item.available_quantity} units (over {rule.threshold_percentage}% of max)"
-            
-            if should_alert:
-                # Check if alert already exists for this product/location/type (any status)
-                existing_alert = db.query(StockAlert).filter(
-                    and_(
-                        StockAlert.product_id == item.product_id,
-                        StockAlert.location_id == item.location_id,
-                        StockAlert.alert_type == alert_type
-                    )
-                ).order_by(StockAlert.created_at.desc()).first()
-                
-                if not existing_alert:
-                    # Create new alert only if no alert has ever existed for this combination
-                    new_alert = StockAlert(
-                        product_id=item.product_id,
-                        location_id=item.location_id,
-                        alert_type=alert_type,
-                        current_quantity=item.available_quantity,
-                        threshold_quantity=rule.threshold_quantity,
-                        message=message
-                    )
-                    db.add(new_alert)
-                    alerts_created += 1
-                    
-                    # Send WebSocket notification for new alert
-                    try:
-                        from app.core.websocket import manager
-                        alert_data = {
-                            "id": new_alert.id,
-                            "product_id": new_alert.product_id,
-                            "location_id": new_alert.location_id,
-                            "alert_type": new_alert.alert_type.value,
-                            "message": new_alert.message,
-                            "current_quantity": new_alert.current_quantity,
-                            "threshold_quantity": new_alert.threshold_quantity,
-                            "status": new_alert.status.value
-                        }
-                        await manager.send_alert(alert_data)
-                    except Exception as e:
-                        print(f"Failed to send WebSocket notification: {e}")
-                        
-                elif existing_alert.status in [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]:
-                    # Update existing active/acknowledged alert to reflect current quantity
-                    existing_alert.current_quantity = item.available_quantity
-                    existing_alert.message = message
-                    existing_alert.updated_at = datetime.now()
-                    alerts_updated += 1
-                elif existing_alert.status in [AlertStatus.RESOLVED, AlertStatus.DISMISSED]:
-                    # Reactivate resolved/dismissed alert if conditions still apply
-                    existing_alert.status = AlertStatus.ACTIVE
-                    existing_alert.current_quantity = item.available_quantity
-                    existing_alert.message = message
-                    existing_alert.acknowledged_at = None
-                    existing_alert.resolved_at = None
-                    existing_alert.updated_at = datetime.now()
-                    alerts_updated += 1
-    
-    db.commit()
-    return {"message": f"Stock alert check completed. {alerts_created} new alerts created, {alerts_updated} alerts updated."}
+    """Manually trigger stock alert check"""
+    try:
+        from app.core.background_tasks import background_task_manager
+        await background_task_manager._check_stock_alerts()
+        return {"message": "Stock alert check completed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error checking stock alerts: {str(e)}")
 
+# WebSocket endpoint for real-time alerts
+@router.websocket("/ws/alerts/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: int):
+    await websocket.accept()
+    try:
+        from app.core.websocket import manager
+        await manager.connect(websocket, user_id)
+        
+        while True:
+            # Keep connection alive
+            await websocket.receive_text()
+            
+    except WebSocketDisconnect:
+        try:
+            from app.core.websocket import manager
+            manager.disconnect(user_id)
+        except:
+            pass
+    except Exception as e:
+        logging.error(f"WebSocket error: {e}")
+
+# Background task management
 @router.get("/background-task/status")
 def get_background_task_status():
-    """Get the status of the background task manager"""
-    from app.core.background_tasks import background_task_manager
-    
-    return {
-        "is_running": background_task_manager.is_running,
-        "check_interval_seconds": background_task_manager.check_interval,
-        "check_interval_minutes": background_task_manager.check_interval / 60,
-        "status": "running" if background_task_manager.is_running else "stopped"
-    }
+    """Get background task status"""
+    try:
+        from app.core.background_tasks import background_task_manager
+        return {
+            "is_running": background_task_manager.is_running,
+            "check_interval": background_task_manager.check_interval
+        }
+    except Exception as e:
+        return {"error": f"Could not get background task status: {str(e)}"}
 
 @router.post("/background-task/trigger")
 async def trigger_immediate_check():
-    """Trigger an immediate stock alert check"""
-    from app.core.background_tasks import background_task_manager
-    
-    if not background_task_manager.is_running:
-        raise HTTPException(status_code=400, detail="Background task manager is not running")
-    
-    # Trigger immediate check
-    await background_task_manager._check_stock_alerts()
-    return {"message": "Immediate stock alert check triggered successfully"}
+    """Trigger immediate background task check"""
+    try:
+        from app.core.background_tasks import background_task_manager
+        await background_task_manager._check_stock_alerts()
+        return {"message": "Immediate check triggered successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error triggering check: {str(e)}")
 
+# Utility endpoints
 @router.post("/cleanup-duplicates")
 def cleanup_duplicate_alerts(db: Session = Depends(get_db)):
-    """Clean up duplicate alerts by keeping only the most recent one for each product/location/type combination"""
-    
-    # Find duplicate alerts
-    duplicates = db.query(
-        StockAlert.product_id,
-        StockAlert.location_id,
-        StockAlert.alert_type,
-        func.count(StockAlert.id).label('count')
-    ).group_by(
-        StockAlert.product_id,
-        StockAlert.location_id,
-        StockAlert.alert_type
-    ).having(func.count(StockAlert.id) > 1).all()
-    
-    deleted_count = 0
-    
-    for duplicate in duplicates:
-        # Get all alerts for this combination, ordered by creation date (newest first)
-        alerts = db.query(StockAlert).filter(
+    """Clean up duplicate stock alerts"""
+    try:
+        # Find and remove duplicate alerts
+        duplicates = db.query(StockAlert).filter(
             and_(
-                StockAlert.product_id == duplicate.product_id,
-                StockAlert.location_id == duplicate.location_id,
-                StockAlert.alert_type == duplicate.alert_type
+                StockAlert.status == AlertStatus.ACTIVE,
+                StockAlert.created_at < datetime.now() - timedelta(hours=1)
             )
-        ).order_by(StockAlert.created_at.desc()).all()
+        ).all()
         
-        # Keep the most recent alert, delete the rest
-        if len(alerts) > 1:
-            for alert in alerts[1:]:  # Skip the first (most recent) one
-                db.delete(alert)
-                deleted_count += 1
-    
-    db.commit()
-    return {"message": f"Cleanup completed. {deleted_count} duplicate alerts removed."} 
+        # Group by product, location, and alert type
+        seen = set()
+        to_delete = []
+        
+        for alert in duplicates:
+            key = (alert.product_id, alert.location_id, alert.alert_type)
+            if key in seen:
+                to_delete.append(alert)
+            else:
+                seen.add(key)
+        
+        # Delete duplicates
+        for alert in to_delete:
+            db.delete(alert)
+        
+        db.commit()
+        
+        return {
+            "message": f"Cleaned up {len(to_delete)} duplicate alerts",
+            "deleted_count": len(to_delete)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error cleaning up duplicates: {str(e)}")
+
+@router.get("/stats")
+def get_alert_stats(db: Session = Depends(get_db)):
+    """Get stock alert statistics"""
+    try:
+        total_alerts = db.query(StockAlert).count()
+        active_alerts = db.query(StockAlert).filter(StockAlert.status == AlertStatus.ACTIVE).count()
+        resolved_alerts = db.query(StockAlert).filter(StockAlert.status == AlertStatus.RESOLVED).count()
+        
+        # Alerts by type
+        low_stock_alerts = db.query(StockAlert).filter(
+            and_(
+                StockAlert.alert_type == AlertType.LOW_STOCK,
+                StockAlert.status == AlertStatus.ACTIVE
+            )
+        ).count()
+        
+        out_of_stock_alerts = db.query(StockAlert).filter(
+            and_(
+                StockAlert.alert_type == AlertType.OUT_OF_STOCK,
+                StockAlert.status == AlertStatus.ACTIVE
+            )
+        ).count()
+        
+        overstock_alerts = db.query(StockAlert).filter(
+            and_(
+                StockAlert.alert_type == AlertType.OVERSTOCK,
+                StockAlert.status == AlertStatus.ACTIVE
+            )
+        ).count()
+        
+        return {
+            "total_alerts": total_alerts,
+            "active_alerts": active_alerts,
+            "resolved_alerts": resolved_alerts,
+            "by_type": {
+                "low_stock": low_stock_alerts,
+                "out_of_stock": out_of_stock_alerts,
+                "overstock": overstock_alerts
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting stats: {str(e)}") 

@@ -5,11 +5,34 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import Optional
 
-from app.core.database import get_db
-from app.models.stock_alert import StockAlert, AlertRule, AlertType, AlertStatus
-from app.models.inventory import Inventory
-from app.models.product import Product
-from app.core.websocket import manager
+# Try to import database and models, but don't fail if they don't work
+try:
+    from app.core.database import get_db
+    from app.models.stock_alert import StockAlert, AlertRule, AlertType, AlertStatus
+    from app.models.inventory import Inventory
+    from app.models.product import Product
+    from app.core.websocket import manager
+    IMPORTS_SUCCESSFUL = True
+except ImportError as e:
+    print(f"⚠️  Warning: Could not import some modules in background_tasks: {e}")
+    IMPORTS_SUCCESSFUL = False
+    # Create dummy classes to prevent import errors
+    class StockAlert:
+        pass
+    class AlertRule:
+        pass
+    class AlertType:
+        LOW_STOCK = "LOW_STOCK"
+        OUT_OF_STOCK = "OUT_OF_STOCK"
+        OVERSTOCK = "OVERSTOCK"
+    class AlertStatus:
+        ACTIVE = "ACTIVE"
+        RESOLVED = "RESOLVED"
+    class Inventory:
+        pass
+    class Product:
+        pass
+    manager = None
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +44,12 @@ class BackgroundTaskManager:
     
     async def start(self):
         """Start the background task manager"""
-        if not self.is_running:
+        if not self.is_running and IMPORTS_SUCCESSFUL:
             self.is_running = True
             self.task = asyncio.create_task(self._run_periodic_checks())
             logger.info("Background task manager started")
+        else:
+            logger.warning("Background task manager not started - imports failed")
     
     async def stop(self):
         """Stop the background task manager"""
@@ -51,6 +76,10 @@ class BackgroundTaskManager:
     
     async def _check_stock_alerts(self):
         """Check for stock alerts and send notifications"""
+        if not IMPORTS_SUCCESSFUL:
+            logger.warning("Skipping stock alert check - imports failed")
+            return
+            
         try:
             # Get database session
             db = next(get_db())
@@ -106,66 +135,82 @@ class BackgroundTaskManager:
                             and_(
                                 StockAlert.product_id == item.product_id,
                                 StockAlert.location_id == item.location_id,
-                                StockAlert.alert_type == alert_type
-                            )
-                        ).order_by(StockAlert.created_at.desc()).first()
-                        
-                        if not existing_alert:
-                            # Create new alert
-                            new_alert = StockAlert(
-                                product_id=item.product_id,
-                                location_id=item.location_id,
-                                alert_type=alert_type,
-                                current_quantity=item.available_quantity,
-                                threshold_quantity=rule.threshold_quantity,
-                                message=message,
-                                status=AlertStatus.ACTIVE
-                            )
-                            db.add(new_alert)
-                            alerts_created += 1
-                            
-                            # Send WebSocket notification
-                            await manager.broadcast_alert(new_alert)
-                        
-                        elif existing_alert.status == AlertStatus.RESOLVED:
-                            # Reactivate resolved alert
-                            existing_alert.status = AlertStatus.ACTIVE
-                            existing_alert.current_quantity = item.available_quantity
-                            existing_alert.message = message
-                            existing_alert.updated_at = datetime.utcnow()
-                            alerts_updated += 1
-                            
-                            # Send WebSocket notification
-                            await manager.broadcast_alert(existing_alert)
-                    
-                    else:
-                        # Check if alert should be resolved
-                        existing_alert = db.query(StockAlert).filter(
-                            and_(
-                                StockAlert.product_id == item.product_id,
-                                StockAlert.location_id == item.location_id,
                                 StockAlert.alert_type == alert_type,
                                 StockAlert.status == AlertStatus.ACTIVE
                             )
                         ).first()
                         
                         if existing_alert:
-                            # Resolve alert
-                            existing_alert.status = AlertStatus.RESOLVED
-                            existing_alert.resolved_at = datetime.utcnow()
-                            existing_alert.updated_at = datetime.utcnow()
+                            # Update existing alert
+                            existing_alert.current_quantity = item.available_quantity
+                            existing_alert.message = message
+                            existing_alert.updated_at = datetime.now()
+                            alerts_updated += 1
+                        else:
+                            # Create new alert
+                            new_alert = StockAlert(
+                                product_id=item.product_id,
+                                location_id=item.location_id,
+                                alert_type=alert_type,
+                                status=AlertStatus.ACTIVE,
+                                current_quantity=item.available_quantity,
+                                threshold_quantity=rule.threshold_quantity,
+                                message=message,
+                                created_at=datetime.now(),
+                                updated_at=datetime.now()
+                            )
+                            db.add(new_alert)
+                            alerts_created += 1
+                    
+                    # Check for resolved alerts
+                    active_alerts = db.query(StockAlert).filter(
+                        and_(
+                            StockAlert.product_id == item.product_id,
+                            StockAlert.location_id == item.location_id,
+                            StockAlert.status == AlertStatus.ACTIVE
+                        )
+                    ).all()
+                    
+                    for alert in active_alerts:
+                        resolved = False
+                        
+                        if alert.alert_type == AlertType.LOW_STOCK:
+                            if item.available_quantity > rule.threshold_quantity:
+                                resolved = True
+                        elif alert.alert_type == AlertType.OUT_OF_STOCK:
+                            if item.available_quantity > 0:
+                                resolved = True
+                        elif alert.alert_type == AlertType.OVERSTOCK:
+                            if rule.threshold_percentage and item.product.max_stock_level:
+                                max_threshold = item.product.max_stock_level * (rule.threshold_percentage / 100)
+                                if item.available_quantity <= max_threshold:
+                                    resolved = True
+                        
+                        if resolved:
+                            alert.status = AlertStatus.RESOLVED
+                            alert.resolved_at = datetime.now()
+                            alert.updated_at = datetime.now()
                             alerts_resolved += 1
             
-            # Commit changes
             db.commit()
             
             if alerts_created > 0 or alerts_updated > 0 or alerts_resolved > 0:
                 logger.info(f"Stock alerts processed: {alerts_created} created, {alerts_updated} updated, {alerts_resolved} resolved")
                 
+                # Send WebSocket notifications if manager is available
+                if manager:
+                    await manager.broadcast({
+                        "type": "stock_alerts_updated",
+                        "data": {
+                            "alerts_created": alerts_created,
+                            "alerts_updated": alerts_updated,
+                            "alerts_resolved": alerts_resolved
+                        }
+                    })
+                    
         except Exception as e:
             logger.error(f"Error checking stock alerts: {e}")
-            if 'db' in locals():
-                db.rollback()
+            # Don't re-raise the exception to prevent the background task from stopping
 
-# Global instance
+# Create a global instance
 background_task_manager = BackgroundTaskManager() 
