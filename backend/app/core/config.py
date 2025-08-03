@@ -5,8 +5,8 @@ import os
 
 class Settings(BaseSettings):
     # Database Configuration
-    # Use environment variables or fallback to local database
-    DATABASE_URL: str = "postgresql://inventory_user:root@postgres:5432/inventory_db"
+    # Railway uses DATABASE_URL environment variable for Neon
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://inventory_user:root@postgres:5432/inventory_db")
     
     # JWT
     SECRET_KEY: str = "your-super-secret-key-change-this-in-production"

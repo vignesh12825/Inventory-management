@@ -77,8 +77,10 @@ async def shutdown_event():
 
 @app.get("/")
 async def root():
+    """Root endpoint - Railway health check target"""
     return {
-        "message": "Welcome to Inventory Management System API",
+        "status": "healthy",
+        "message": "Inventory Management System API is running",
         "version": "1.0.0",
         "docs": "/docs",
         "redoc": "/redoc",
@@ -98,27 +100,8 @@ async def ping():
 
 @app.get("/api/v1/health")
 async def api_health_check():
-    """Simple health check for Railway deployment"""
-    try:
-        return {
-            "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
-            "version": "1.0.0",
-            "message": "Inventory Management System API is running"
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "timestamp": datetime.now().isoformat(),
-            "error": str(e),
-            "message": "Service is experiencing issues"
-        }
+    """API health check endpoint"""
+    return {"status": "healthy", "message": "API is running"}
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    ) 
+    uvicorn.run(app, host="0.0.0.0", port=8000) 

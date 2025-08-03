@@ -12,6 +12,15 @@ def create_minimal_app():
     """Create a minimal FastAPI app for Railway"""
     app = FastAPI(title="Inventory Management System")
     
+    @app.get("/")
+    async def root():
+        """Root endpoint - Railway health check target"""
+        return {
+            "status": "healthy",
+            "message": "Inventory Management System API is running",
+            "version": "1.0.0"
+        }
+    
     @app.get("/ping")
     async def ping():
         """Minimal health check for Railway"""
@@ -22,46 +31,42 @@ def create_minimal_app():
         """Basic health check"""
         return {"status": "healthy", "message": "Service is running"}
     
-    @app.get("/")
-    async def root():
-        return {"message": "Inventory Management System API", "version": "1.0.0"}
-    
     return app
 
-def main():
-    """Main startup function"""
-    print("🚀 Starting Railway application...")
-    
+def create_full_app():
+    """Create the full application with all features"""
     try:
-        # Try to import the main application
-        import main
+        # Add the correct path for imports
+        backend_path = os.path.join(os.path.dirname(__file__), 'backend')
+        app_path = os.path.join(os.path.dirname(__file__), 'app')
+        
+        if os.path.exists(backend_path):
+            sys.path.insert(0, backend_path)
+        elif os.path.exists(app_path):
+            sys.path.insert(0, app_path)
+        
+        # Try to import the main app
         from main import app
-        print("✅ Successfully imported main application")
-        
+        print("✅ Successfully imported full application")
+        return app
     except ImportError as e:
-        print(f"⚠️  Import error: {e}")
-        print("🔄 Falling back to minimal application...")
-        app = create_minimal_app()
-        
+        print(f"⚠️  Warning: Could not import full application: {e}")
+        print("🔄 Falling back to minimal application")
+        return create_minimal_app()
     except Exception as e:
-        print(f"❌ Error importing main app: {e}")
-        print("🔄 Falling back to minimal application...")
-        app = create_minimal_app()
-    
-    # Get port from environment or use default
-    port = int(os.environ.get("PORT", 8000))
-    
-    print(f"🌐 Starting server on port {port}")
-    print("🔍 Health check endpoints: /health, /ping")
-    print("📊 Railway will use /health for health checks")
-    
-    # Start the server
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=port,
-        log_level="info"
-    )
+        print(f"❌ Error importing full application: {e}")
+        print("🔄 Falling back to minimal application")
+        return create_minimal_app()
 
 if __name__ == "__main__":
-    main() 
+    print("🚀 Starting Railway deployment...")
+    
+    # Try to create the full app, fallback to minimal if needed
+    app = create_full_app()
+    
+    # Start the server
+    port = int(os.getenv("PORT", 8000))
+    host = "0.0.0.0"
+    
+    print(f"🌐 Starting server on {host}:{port}")
+    uvicorn.run(app, host=host, port=port, log_level="info") 
