@@ -1,0 +1,41 @@
+# Standalone Frontend Dockerfile - No package manager authentication
+FROM node:18-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies without any authentication
+# Use npm with explicit public registry and no auth
+RUN npm config set registry https://registry.npmjs.org/
+RUN npm config set strict-ssl false
+RUN npm config delete _auth
+RUN npm config delete _authToken
+RUN npm config delete username
+RUN npm config delete password
+RUN npm config delete email
+
+# Install dependencies with explicit public registry and no auth
+RUN npm install --omit=dev --no-audit --no-fund --no-optional --registry=https://registry.npmjs.org/ --no-progress
+
+# Copy source code
+COPY . .
+
+# Build the React app
+RUN npm run build
+
+# Install serve globally with no auth
+RUN npm install -g serve --registry=https://registry.npmjs.org/ --no-progress
+
+# Create non-root user
+RUN adduser -D appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 3000
+
+# Start the app
+CMD ["serve", "-s", "build", "-l", "3000"] 

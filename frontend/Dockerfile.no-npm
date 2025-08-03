@@ -1,0 +1,32 @@
+# Frontend Dockerfile - No npm authentication issues
+FROM node:18-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Use yarn instead of npm to avoid authentication issues
+RUN npm install -g yarn
+RUN yarn install --production --frozen-lockfile
+
+# Copy source code
+COPY . .
+
+# Build the React app
+RUN yarn build
+
+# Install serve globally using yarn
+RUN yarn global add serve
+
+# Create non-root user
+RUN adduser -D appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 3000
+
+# Start the app
+CMD ["serve", "-s", "build", "-l", "3000"] 
