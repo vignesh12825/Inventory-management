@@ -5,11 +5,8 @@ import os
 
 class Settings(BaseSettings):
     # Database Configuration
-    # Use Neon database URL with the shared password
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", 
-        "postgresql://neondb_owner:npg_e6bOIDHrsf8T@ep-empty-glade-a1f1p80o-pooler.ap-southeast-1.aws.neon.tech:5432/neondb"
-    )
+    # Use Railway's DATABASE_URL environment variable
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     
     # JWT
     SECRET_KEY: str = "your-super-secret-key-change-this-in-production"
