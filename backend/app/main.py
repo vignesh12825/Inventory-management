@@ -18,8 +18,8 @@ from app.models import Base
 # Temporarily disable background tasks to isolate health check issue
 # from app.core.background_tasks import background_task_manager
 
-# Note: Database tables are created via init.sql script
-# Base.metadata.create_all(bind=engine)  # Commented out to avoid conflicts
+# Create database tables if they don't exist
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
