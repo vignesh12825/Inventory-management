@@ -8,7 +8,7 @@ from app.schemas.stock_alert import (
     StockAlertUpdate,
     StockAlertResponse
 )
-from app.core.auth import get_current_user
+from app.core.security import get_current_user
 from app.models.user import User
 
 router = APIRouter()
