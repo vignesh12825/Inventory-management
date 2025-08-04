@@ -12,16 +12,22 @@ import {
   PaginatedResponse, UserWithPermissions, UserCreate, UserUpdate
 } from '../types';
 
-// Use environment variable for API URL, fallback to localhost for development
+// Update this to use your actual backend URL
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 const API_VERSION = process.env.REACT_APP_API_VERSION || '/api/v1';
+
+// For production, ensure HTTPS is used
+const isProduction = process.env.NODE_ENV === 'production';
+const secureApiUrl = isProduction && !API_BASE_URL.startsWith('https') 
+  ? API_BASE_URL.replace('http://', 'https://') 
+  : API_BASE_URL;
 
 class ApiService {
   private api: AxiosInstance;
 
   constructor() {
     this.api = axios.create({
-      baseURL: `${API_BASE_URL}${API_VERSION}`,
+      baseURL: `${secureApiUrl}${API_VERSION}`,
       headers: {
         'Content-Type': 'application/json',
       },
