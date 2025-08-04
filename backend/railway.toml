@@ -6,7 +6,7 @@ healthcheckPath = "/ping"
 healthcheckTimeout = 600
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
-startCommand = "bash start_railway.sh"
+startCommand = "bash force_migrate.sh && bash start_railway.sh"
 
 [env]
 PYTHON_VERSION = "3.10" 
