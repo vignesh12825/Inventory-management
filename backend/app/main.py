@@ -19,7 +19,13 @@ from app.models import Base
 # from app.core.background_tasks import background_task_manager
 
 # Create database tables if they don't exist
-Base.metadata.create_all(bind=engine)
+try:
+    print("Creating database tables...")
+    Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully")
+except Exception as e:
+    print(f"Error creating database tables: {e}")
+    # Continue without tables for now
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

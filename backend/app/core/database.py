@@ -3,7 +3,10 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
-# Create database engine
+# Create database engine with error handling
+if not settings.DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is not set")
+
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,

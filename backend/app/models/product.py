@@ -32,4 +32,4 @@ class Product(Base):
     supplier = relationship("Supplier", back_populates="products")
     inventory_items = relationship("Inventory", back_populates="product")
     purchase_order_items = relationship("PurchaseOrderItem", back_populates="product", cascade="all, delete-orphan")
-    stock_alerts = relationship("StockAlert", cascade="all, delete-orphan") 
+    stock_alerts = relationship("StockAlert", back_populates="product", cascade="all, delete-orphan") 
