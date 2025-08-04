@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 from app.main import app
 from app.core.database import get_db
-from app.models.inventory import Inventory, StockMovement, StockMovementType, Location
+from app.models.inventory import Inventory, StockMovement, StockMovementType
+from app.models.location import Location
 from app.models.product import Product
 from app.models.user import User, UserRole
 from app.core.security import create_access_token

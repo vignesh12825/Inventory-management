@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.location import Location, LocationCreate, LocationUpdate
 from app.schemas.common import PaginatedResponse
-from app.models.inventory import Location as LocationModel
+from app.models.location import Location as LocationModel
 from sqlalchemy import and_
 
 router = APIRouter()
