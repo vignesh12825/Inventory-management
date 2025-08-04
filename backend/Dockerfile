@@ -7,6 +7,7 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -21,5 +22,12 @@ COPY . .
 # Expose port 8000
 EXPOSE 8000
 
-# Run the FastAPI application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"] 
+# Create startup script
+RUN echo '#!/bin/bash\n\
+echo "Running database migrations..."\n\
+alembic upgrade head\n\
+echo "Starting FastAPI application..."\n\
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000' > /app/start.sh && chmod +x /app/start.sh
+
+# Run the startup script
+CMD ["/app/start.sh"] 
