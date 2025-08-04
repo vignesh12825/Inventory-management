@@ -27,6 +27,14 @@ except Exception as e:
     print(f"Error creating database tables: {e}")
     # Continue without tables for now
 
+# Test basic imports
+try:
+    print("Testing API router import...")
+    from app.api.v1.api import api_router
+    print("API router imported successfully")
+except Exception as e:
+    print(f"Error importing API router: {e}")
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version="1.0.0",
