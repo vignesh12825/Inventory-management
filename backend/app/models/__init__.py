@@ -4,8 +4,7 @@ from .category import Category
 from .inventory import Inventory
 from .supplier import Supplier
 from .location import Location
-from .purchase_order import PurchaseOrder
-from .purchase_order_item import PurchaseOrderItem
+from .purchase_order import PurchaseOrder, PurchaseOrderItem
 from .stock_alert import StockAlert
 
 __all__ = [
