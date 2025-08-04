@@ -99,6 +99,32 @@ async def api_health_check():
             "message": "Service is experiencing issues"
         }
 
+@app.get("/api/v1/debug/db")
+async def debug_database():
+    """Debug database connection"""
+    try:
+        from app.core.config import settings
+        from app.core.database import engine
+        from sqlalchemy import text
+        
+        # Test database connection
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT current_database(), current_user"))
+            db_info = result.fetchone()
+            
+        return {
+            "database_url": settings.DATABASE_URL[:50] + "..." if len(settings.DATABASE_URL) > 50 else settings.DATABASE_URL,
+            "database_name": db_info[0] if db_info else "unknown",
+            "database_user": db_info[1] if db_info else "unknown",
+            "status": "connected"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "database_url": settings.DATABASE_URL[:50] + "..." if len(settings.DATABASE_URL) > 50 else settings.DATABASE_URL
+        }
+
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
