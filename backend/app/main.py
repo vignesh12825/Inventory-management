@@ -131,6 +131,18 @@ async def debug_database():
             "database_url": settings.DATABASE_URL[:50] + "..." if len(settings.DATABASE_URL) > 50 else settings.DATABASE_URL
         }
 
+@app.get("/api/v1/debug/env")
+async def debug_environment():
+    """Debug environment variables"""
+    import os
+    return {
+        "database_url_set": bool(os.getenv("DATABASE_URL")),
+        "database_url_length": len(os.getenv("DATABASE_URL", "")),
+        "database_url_preview": os.getenv("DATABASE_URL", "")[:50] + "..." if len(os.getenv("DATABASE_URL", "")) > 50 else os.getenv("DATABASE_URL", ""),
+        "environment": os.getenv("ENVIRONMENT", "unknown"),
+        "debug": os.getenv("DEBUG", "unknown")
+    }
+
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
