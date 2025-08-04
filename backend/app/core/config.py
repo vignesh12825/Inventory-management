@@ -21,14 +21,12 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "Inventory Management System"
     
-    # CORS - Allow Railway domain and Vercel domains
+    # CORS - Allow Railway domain
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000", 
         "http://localhost:8000",
         "https://*.railway.app",
-        "https://*.up.railway.app",
-        "https://*.vercel.app",
-        "https://*.vercel.app/*"
+        "https://*.up.railway.app"
     ]
     
     # Environment

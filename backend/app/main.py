@@ -73,7 +73,8 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """Basic health check - always returns healthy for Railway"""
+    return {"status": "healthy", "message": "Service is running"}
 
 @app.get("/ping")
 async def ping():
