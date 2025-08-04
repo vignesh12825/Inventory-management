@@ -21,10 +21,13 @@ from app.models import Base
 # Create database tables if they don't exist
 try:
     print("Creating database tables...")
+    print(f"Database URL: {settings.DATABASE_URL[:50]}..." if len(settings.DATABASE_URL) > 50 else settings.DATABASE_URL)
     Base.metadata.create_all(bind=engine)
     print("Database tables created successfully")
 except Exception as e:
     print(f"Error creating database tables: {e}")
+    import traceback
+    traceback.print_exc()
     # Continue without tables for now
 
 # Test basic imports
